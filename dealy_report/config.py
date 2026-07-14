@@ -18,6 +18,12 @@ _PROFILE_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SECRET_FIELDS = frozenset({"webhook", "app_id", "app_secret", "bot_secret"})
 _SOURCE_BALANCES = frozenset({"domestic", "global", "balanced"})
 _REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh"})
+SECTION_LABELS = {
+    "model-platform": "模型与平台更新",
+    "developer-open-source": "开发者工具与开源",
+    "agent-engineering": "Agent 工程实践",
+    "benchmarks-evaluation": "Benchmark 与评测信号",
+}
 
 
 class ConfigError(ValueError):
@@ -41,6 +47,7 @@ class ProfileConfig:
     language: str = "zh-CN"
     audience: str = "developer/tech-lead"
     topics: tuple[str, ...] = ("AI engineering",)
+    sections: tuple[str, ...] = tuple(SECTION_LABELS)
     source_balance: str = "balanced"
     model: str = "gpt-5.5"
     reasoning_effort: str = "high"
@@ -63,6 +70,8 @@ class ProfileConfig:
         _validate_timezone(self.timezone)
         topics = _normalize_topics(self.topics)
         object.__setattr__(self, "topics", topics)
+        sections = _normalize_sections(self.sections)
+        object.__setattr__(self, "sections", sections)
         if self.source_balance not in _SOURCE_BALANCES:
             raise ConfigError("Source balance is unsupported.")
         if self.reasoning_effort not in _REASONING_EFFORTS:
@@ -81,6 +90,7 @@ class ProfileConfig:
             "language": self.language,
             "audience": self.audience,
             "topics": list(self.topics),
+            "sections": list(self.sections),
             "source_balance": self.source_balance,
             "model": self.model,
             "reasoning_effort": self.reasoning_effort,
@@ -167,6 +177,20 @@ def _normalize_topics(value: object) -> tuple[str, ...]:
     if not topics or any(not isinstance(topic, str) or not topic.strip() for topic in topics):
         raise ConfigError("Topics must be a non-empty sequence of text.")
     return topics
+
+
+def _normalize_sections(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        raise ConfigError("Sections must be a non-empty sequence.")
+    try:
+        sections = tuple(value)  # type: ignore[arg-type]
+    except TypeError as error:
+        raise ConfigError("Sections must be a non-empty sequence.") from error
+    if not sections or any(not isinstance(section, str) or section not in SECTION_LABELS for section in sections):
+        raise ConfigError("Sections contain an unsupported value.")
+    if len(set(sections)) != len(sections):
+        raise ConfigError("Sections must not contain duplicates.")
+    return sections
 
 
 def config_dir(

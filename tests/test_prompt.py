@@ -10,6 +10,7 @@ class PromptTests(unittest.TestCase):
             language="zh-CN",
             audience="开发者和技术负责人",
             topics=("代码 Agent", "企业落地"),
+            sections=("model-platform", "benchmarks-evaluation"),
             source_balance="balanced",
             max_cards=3,
         )
@@ -20,6 +21,9 @@ class PromptTests(unittest.TestCase):
         self.assertIn("开发者和技术负责人", prompt)
         self.assertIn("代码 Agent、企业落地", prompt)
         self.assertIn("Agent 真实项目应用", prompt)
+        self.assertIn("模型与平台更新", prompt)
+        self.assertIn("Benchmark 与评测信号", prompt)
+        self.assertNotIn("开发者工具与开源、Agent 工程实践", prompt)
         self.assertIn("2-3", prompt)
         self.assertIn("3-4", prompt)
         self.assertIn("HTTPS", prompt)
@@ -28,4 +32,3 @@ class PromptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -19,6 +19,15 @@ class ProfileConfigDefaultsTests(unittest.TestCase):
         self.assertEqual("developer/tech-lead", config.audience)
         self.assertIsInstance(config.topics, tuple)
         self.assertTrue(config.topics)
+        self.assertEqual(
+            (
+                "model-platform",
+                "developer-open-source",
+                "agent-engineering",
+                "benchmarks-evaluation",
+            ),
+            config.sections,
+        )
         self.assertEqual("balanced", config.source_balance)
         self.assertEqual("gpt-5.5", config.model)
         self.assertEqual("high", config.reasoning_effort)
@@ -41,6 +50,9 @@ class ProfileConfigValidationTests(unittest.TestCase):
             {"timezone": "Mars/Olympus"},
             {"topics": ()},
             {"topics": ("",)},
+            {"sections": ()},
+            {"sections": ("model-platform", "model-platform")},
+            {"sections": ("agent-real-projects",)},
             {"source_balance": "regional"},
             {"reasoning_effort": "maximum"},
             {"max_cards": 0},
