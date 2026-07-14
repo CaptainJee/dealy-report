@@ -39,6 +39,10 @@ class FeishuError(RuntimeError):
     pass
 
 
+class FeishuDeliveryUncertain(FeishuError):
+    """The webhook request may have reached Feishu but no response was received."""
+
+
 def get_setting(name: str) -> str | None:
     # User-level settings are authoritative on Windows. Long-running parent
     # processes can otherwise pass a stale webhook value to scheduled jobs.
@@ -64,13 +68,15 @@ def decode_json_response(response: Any) -> dict[str, Any]:
     return result
 
 
-def open_request(request: urllib.request.Request, timeout: int = 45) -> Any:
+def open_request(request: urllib.request.Request, timeout: int = 45, delivery: bool = False) -> Any:
     try:
         return urllib.request.urlopen(request, timeout=timeout)
     except urllib.error.HTTPError as error:
         details = error.read().decode("utf-8", errors="replace")[:1000]
         raise FeishuError(f"HTTP {error.code}: {details}") from error
     except urllib.error.URLError as error:
+        if delivery:
+            raise FeishuDeliveryUncertain("Feishu delivery result is uncertain after a network failure") from error
         raise FeishuError(f"Network request failed: {error.reason}") from error
 
 
@@ -239,7 +245,7 @@ def send_card(webhook: str, card: dict[str, Any], signing_secret: str | None) ->
         headers={"Content-Type": "application/json; charset=utf-8"},
         method="POST",
     )
-    decode_json_response(open_request(request))
+    decode_json_response(open_request(request, delivery=True))
 
 
 def main() -> int:
