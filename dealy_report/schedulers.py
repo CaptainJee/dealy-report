@@ -457,7 +457,18 @@ def _raise_unexpected_removal_failure(completed: subprocess.CompletedProcess[str
     if completed.returncode == 0:
         return
     detail = f"{completed.stdout}\n{completed.stderr}".lower()
-    if any(fragment in detail for fragment in ("cannot find", "could not find", "not found", "does not exist", "not exist")):
+    if any(
+        fragment in detail
+        for fragment in (
+            "cannot find",
+            "could not find",
+            "not found",
+            "does not exist",
+            "not exist",
+            "not loaded",
+            "no such process",
+        )
+    ):
         return
     raise SchedulerError(f"{command_name} removal failed: {detail.strip() or completed.returncode}")
 

@@ -292,6 +292,29 @@ class SchedulerInstallationTests(unittest.TestCase):
             self.assertEqual(run.call_count, 2)
             self.assertFalse(marker.exists())
 
+    def test_systemd_remove_tolerates_an_already_missing_unit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            data_dir = Path(temporary_dir)
+            marker = data_dir / "schedulers" / "dealy-report-weekday-report.backend"
+            marker.parent.mkdir(parents=True)
+            marker.write_text("systemd\n", encoding="utf-8")
+            completed = [
+                subprocess.CompletedProcess(
+                    ["systemctl", "--user", "disable"],
+                    1,
+                    "",
+                    "Unit dealy-report-weekday-report.timer not loaded.",
+                ),
+                subprocess.CompletedProcess(["systemctl", "--user", "daemon-reload"], 0, "", ""),
+            ]
+            with patch("dealy_report.schedulers.Path.home", return_value=data_dir / "home"), patch(
+                "dealy_report.schedulers.shutil.which", return_value="/usr/bin/systemctl"
+            ), patch("dealy_report.schedulers.subprocess.run", side_effect=completed):
+                result = remove_scheduler("weekday-report", data_dir, platform_name="Linux")
+
+            self.assertEqual(result["backend"], "systemd")
+            self.assertFalse(marker.exists())
+
     def test_dry_runs_do_not_call_subprocess_or_create_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             data_dir = Path(temporary_dir) / "new-data"
