@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+*.manifest.local.json
+feishu_ai_daily_status.txt
