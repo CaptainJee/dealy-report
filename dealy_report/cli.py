@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence, TextIO
 
@@ -352,6 +353,15 @@ def _redact(message: str, values: dict[str, str]) -> str:
     return clean
 
 
+def _append_run_log(deps: Dependencies, profile_id: str, message: str) -> None:
+    path = deps.data_root / "logs" / f"{scheduler_name(profile_id)}.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    single_line = message.replace("\r", " ").replace("\n", " ")
+    with path.open("a", encoding="utf-8", newline="\n") as log_file:
+        log_file.write(f"{timestamp} {single_line}\n")
+
+
 def _run(args: argparse.Namespace, deps: Dependencies, *, force: bool) -> int:
     profile = _load_profile(deps, args.profile)
     values = _credential_values(deps, profile.profile_id)
@@ -368,9 +378,16 @@ def _run(args: argparse.Namespace, deps: Dependencies, *, force: bool) -> int:
     if outcome.report_path:
         fields.append(f"report={outcome.report_path}")
     fields.extend((f"cards={outcome.delivered_cards}", f"images={outcome.uploaded_images}"))
-    print(" ".join(fields), file=deps.stdout)
+    message = " ".join(fields)
+    print(message, file=deps.stdout)
+    clean_error = _redact(outcome.error, values) if outcome.error else None
     if outcome.error:
-        print(f"error: {_redact(outcome.error, values)}", file=deps.stderr)
+        print(f"error: {clean_error}", file=deps.stderr)
+    _append_run_log(
+        deps,
+        profile.profile_id,
+        f"{message} error={clean_error}" if clean_error else message,
+    )
     return 1 if outcome.status in {"failed", "send_failed", "uncertain"} else 0
 
 

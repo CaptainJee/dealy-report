@@ -254,6 +254,11 @@ class CliTests(unittest.TestCase):
             self.assertNotIn("private-hook", output)
             self.assertNotIn("private-secret", output)
             self.assertIn("[redacted]", output)
+            log = (root / "data" / "logs" / "dealy-report-daily-ai.log").read_text(encoding="utf-8")
+            self.assertEqual(log.count("status=failed"), 2)
+            self.assertIn("[redacted]", log)
+            self.assertNotIn("private-hook", log)
+            self.assertNotIn("private-secret", log)
 
     def test_doctor_reports_all_checks_and_live_delivery_is_opt_in(self):
         from dealy_report import cli
