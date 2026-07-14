@@ -55,6 +55,10 @@ class ProfileConfig:
         validate_profile_id(self.profile_id)
         if not isinstance(self.task_name, str) or not self.task_name.strip():
             raise ConfigError("Task name must not be empty.")
+        for field_name in ("language", "audience", "model", "service_tier"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ConfigError(f"{field_name.replace('_', ' ').title()} must not be empty.")
         _validate_schedule_time(self.schedule_time)
         _validate_timezone(self.timezone)
         topics = _normalize_topics(self.topics)
@@ -177,6 +181,8 @@ def config_dir(
     user_home = Path.home() if home is None else Path(home)
     if platform.startswith("win"):
         return Path(environment.get("APPDATA", user_home / "AppData" / "Roaming")) / "dealy-report"
+    if platform.startswith("darwin"):
+        return user_home / "Library" / "Application Support" / "dealy-report"
     return Path(environment.get("XDG_CONFIG_HOME", user_home / ".config")) / "dealy-report"
 
 
@@ -197,6 +203,8 @@ def data_dir(
                 environment.get("APPDATA", user_home / "AppData" / "Local"),
             )
         ) / "dealy-report"
+    if platform.startswith("darwin"):
+        return user_home / "Library" / "Application Support" / "dealy-report"
     return Path(environment.get("XDG_DATA_HOME", user_home / ".local" / "share")) / "dealy-report"
 
 

@@ -32,6 +32,10 @@ class ProfileConfigValidationTests(unittest.TestCase):
 
         invalid_values = (
             {"profile_id": "Daily AI"},
+            {"language": ""},
+            {"audience": "  "},
+            {"model": ""},
+            {"service_tier": ""},
             {"schedule_time": "08:32"},
             {"schedule_time": "25:00"},
             {"timezone": "Mars/Olympus"},
@@ -136,6 +140,14 @@ class ConfigDirectoryTests(unittest.TestCase):
                 home=root,
             ),
         )
+
+    def test_uses_macos_application_support_directory(self) -> None:
+        from dealy_report.config import config_dir, data_dir
+
+        home = Path("/Users/example")
+        expected = home / "Library" / "Application Support" / "dealy-report"
+        self.assertEqual(expected, config_dir(env={}, platform_name="darwin", home=home))
+        self.assertEqual(expected, data_dir(env={}, platform_name="darwin", home=home))
 
 
 if __name__ == "__main__":
