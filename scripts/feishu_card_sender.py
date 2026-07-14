@@ -7,9 +7,10 @@ import argparse
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
-import mimetypes
 import os
+import socket
 import sys
 import time
 import urllib.error
@@ -88,32 +89,89 @@ def get_tenant_access_token(app_id: str, app_secret: str) -> str:
     return str(token)
 
 
-def load_image(source: str) -> tuple[bytes, str, str]:
+def validate_remote_url(source: str, resolver: Any = socket.getaddrinfo) -> str:
+    parsed = urllib.parse.urlsplit(source)
+    if parsed.scheme.lower() != "https":
+        raise FeishuError(f"Remote images must use HTTPS: {source}")
+    if not parsed.hostname or parsed.username or parsed.password:
+        raise FeishuError(f"Remote image URL is invalid: {source}")
+    try:
+        addresses = resolver(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as error:
+        raise FeishuError(f"Image host could not be resolved: {parsed.hostname}") from error
+    if not addresses:
+        raise FeishuError(f"Image host could not be resolved: {parsed.hostname}")
+    for address in addresses:
+        raw_address = address[4][0].split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(raw_address)
+        except ValueError as error:
+            raise FeishuError(f"Image host returned an invalid address: {parsed.hostname}") from error
+        if not ip.is_global:
+            raise FeishuError(f"Image host must resolve to a public address: {parsed.hostname}")
+    return source
+
+
+class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, resolver: Any = socket.getaddrinfo) -> None:
+        super().__init__()
+        self.resolver = resolver
+
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+        validate_remote_url(newurl, resolver=self.resolver)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def detect_image_content_type(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    raise FeishuError("Image signature is not a supported PNG, JPEG, GIF, or WebP")
+
+
+def _is_inside(path: Path, roots: list[Path]) -> bool:
+    return any(path == root or path.is_relative_to(root) for root in roots)
+
+
+def load_image(source: str, allowed_local_roots: list[Path] | None = None) -> tuple[bytes, str, str]:
     if source.startswith(("https://", "http://")):
+        validate_remote_url(source)
         request = urllib.request.Request(source, headers={"User-Agent": "Codex-AI-Daily/1.0"})
-        response = open_request(request)
-        content_type = response.headers.get_content_type().lower()
+        opener = urllib.request.build_opener(SafeRedirectHandler())
+        try:
+            response = opener.open(request, timeout=45)
+        except urllib.error.HTTPError as error:
+            details = error.read().decode("utf-8", errors="replace")[:1000]
+            raise FeishuError(f"HTTP {error.code}: {details}") from error
+        except urllib.error.URLError as error:
+            raise FeishuError(f"Network request failed: {error.reason}") from error
         data = response.read(MAX_IMAGE_BYTES + 1)
         filename = Path(urllib.parse.urlparse(source).path).name or "image"
     else:
         path = Path(source).expanduser().resolve()
         if not path.is_file():
             raise FeishuError(f"Image file does not exist: {path}")
+        roots = [root.expanduser().resolve() for root in (allowed_local_roots or [])]
+        if not _is_inside(path, roots):
+            raise FeishuError(f"Local image is outside an allowed root: {path}")
         data = path.read_bytes()
-        content_type = (mimetypes.guess_type(path.name)[0] or "").lower()
         filename = path.name
 
     if len(data) == 0:
         raise FeishuError(f"Image is empty: {source}")
     if len(data) > MAX_IMAGE_BYTES:
         raise FeishuError(f"Image exceeds 10 MB: {source}")
-    if content_type not in ALLOWED_IMAGE_TYPES:
-        raise FeishuError(f"Unsupported image type {content_type or 'unknown'}: {source}")
+    content_type = detect_image_content_type(data)
     return data, content_type, filename
 
 
-def upload_image(token: str, source: str) -> str:
-    image, content_type, filename = load_image(source)
+def upload_image(token: str, source: str, allowed_local_roots: list[Path] | None = None) -> str:
+    image, content_type, filename = load_image(source, allowed_local_roots=allowed_local_roots)
     boundary = f"----CodexFeishu{uuid.uuid4().hex}"
     delimiter = f"--{boundary}\r\n".encode("ascii")
     body = b"".join(
@@ -187,6 +245,7 @@ def send_card(webhook: str, card: dict[str, Any], signing_secret: str | None) ->
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest", type=Path)
+    parser.add_argument("--allow-local-image-root", action="append", type=Path, default=[])
     args = parser.parse_args()
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
@@ -206,10 +265,11 @@ def main() -> int:
         if not app_id or not app_secret:
             raise FeishuError("Feishu app credentials are required to upload images")
         token = get_tenant_access_token(app_id, app_secret)
+        allowed_roots = [args.manifest.resolve().parent, *args.allow_local_image_root]
         for name, source in images.items():
             if not isinstance(name, str) or not isinstance(source, str):
                 raise FeishuError("Image names and sources must be strings")
-            image_keys[name] = upload_image(token, source)
+            image_keys[name] = upload_image(token, source, allowed_local_roots=allowed_roots)
 
     signing_secret = get_setting("FEISHU_AI_DAILY_BOT_SECRET")
     for card in cards:
