@@ -66,7 +66,7 @@ def decode_json_response(response: Any) -> dict[str, Any]:
     except json.JSONDecodeError as error:
         raise FeishuError(f"Feishu returned non-JSON data (HTTP {response.status})") from error
     if result.get("code") not in (None, 0):
-        raise FeishuError(f"Feishu error {result.get('code')}: {result.get('msg', 'unknown error')}")
+        raise FeishuError(f"Feishu returned error code {result.get('code')}")
     return result
 
 
@@ -74,12 +74,11 @@ def open_request(request: urllib.request.Request, timeout: int = 45, delivery: b
     try:
         return urllib.request.urlopen(request, timeout=timeout)
     except urllib.error.HTTPError as error:
-        details = error.read().decode("utf-8", errors="replace")[:1000]
-        raise FeishuError(f"HTTP {error.code}: {details}") from error
+        raise FeishuError(f"Feishu request failed with HTTP {error.code}") from error
     except urllib.error.URLError as error:
         if delivery:
             raise FeishuDeliveryUncertain("Feishu delivery result is uncertain after a network failure") from error
-        raise FeishuError(f"Network request failed: {error.reason}") from error
+        raise FeishuError("Network request failed") from error
 
 
 def get_tenant_access_token(app_id: str, app_secret: str) -> str:
@@ -215,9 +214,9 @@ def load_image(source: str, allowed_local_roots: list[Path] | None = None) -> tu
         filename = path.name
 
     if len(data) == 0:
-        raise FeishuError(f"Image is empty: {source}")
+        raise FeishuError("Image is empty")
     if len(data) > MAX_IMAGE_BYTES:
-        raise FeishuError(f"Image exceeds 10 MB: {source}")
+        raise FeishuError("Image exceeds 10 MB")
     content_type = detect_image_content_type(data)
     return data, content_type, filename
 

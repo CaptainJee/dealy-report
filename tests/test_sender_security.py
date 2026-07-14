@@ -1,13 +1,20 @@
+import io
 import socket
+import ssl
 import tempfile
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.feishu_card_sender import (
     FeishuError,
+    PinnedHTTPSConnection,
     detect_image_content_type,
     fetch_remote_image,
     load_image,
+    open_request,
     validate_remote_url,
 )
 
@@ -138,6 +145,57 @@ class SenderSecurityTests(unittest.TestCase):
         self.assertNotIn("sensitive", message)
         self.assertNotIn("hidden", message)
         self.assertNotIn("upstream-secret-body", message)
+
+    def test_remote_size_errors_do_not_echo_a_signed_url(self):
+        source = "https://cdn.example.com/image.png?token=sensitive"
+        for data, expected in ((b"", "empty"), (b"too-large", "10 MB")):
+            with self.subTest(expected=expected), patch(
+                "scripts.feishu_card_sender.fetch_remote_image",
+                return_value=(data, "image.png"),
+            ), patch("scripts.feishu_card_sender.MAX_IMAGE_BYTES", 1):
+                with self.assertRaisesRegex(FeishuError, expected) as raised:
+                    load_image(source)
+            self.assertNotIn("sensitive", str(raised.exception))
+            self.assertNotIn("token", str(raised.exception))
+
+    def test_feishu_http_error_does_not_echo_response_body_or_request_url(self):
+        request = urllib.request.Request("https://open.feishu.cn/hook?token=sensitive")
+        error = urllib.error.HTTPError(
+            request.full_url,
+            403,
+            "Forbidden",
+            {},
+            io.BytesIO(b"upstream-secret-body"),
+        )
+        with patch("scripts.feishu_card_sender.urllib.request.urlopen", side_effect=error):
+            with self.assertRaisesRegex(FeishuError, "HTTP 403") as raised:
+                open_request(request)
+
+        message = str(raised.exception)
+        self.assertNotIn("sensitive", message)
+        self.assertNotIn("upstream-secret-body", message)
+
+    def test_pinned_connection_uses_validated_ip_and_original_hostname_for_sni(self):
+        connection = PinnedHTTPSConnection("images.example.com", 443, "93.184.216.34", 45)
+        self.assertTrue(connection._context.check_hostname)
+        self.assertEqual(connection._context.verify_mode, ssl.CERT_REQUIRED)
+
+        class Context:
+            def __init__(self):
+                self.server_hostname = None
+
+            def wrap_socket(self, sock, server_hostname=None):
+                self.server_hostname = server_hostname
+                return sock
+
+        context = Context()
+        connection._context = context
+        raw_socket = object()
+        with patch("scripts.feishu_card_sender.socket.create_connection", return_value=raw_socket) as create:
+            connection.connect()
+
+        create.assert_called_once_with(("93.184.216.34", 443), 45, None)
+        self.assertEqual(context.server_hostname, "images.example.com")
 
 
 if __name__ == "__main__":
