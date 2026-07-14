@@ -83,6 +83,13 @@ def _object(value: Any, field: str) -> dict[str, Any]:
     return value
 
 
+def _exact_keys(value: dict[str, Any], expected: set[str], field: str) -> None:
+    unexpected = set(value) - expected
+    if unexpected:
+        names = ", ".join(sorted(unexpected))
+        raise ReportValidationError(f"{field} contains unexpected fields: {names}")
+
+
 def _list(value: Any, field: str) -> list[Any]:
     if not isinstance(value, list):
         raise ReportValidationError(f"{field} must be an array")
@@ -105,6 +112,7 @@ def _https(value: Any, field: str) -> str:
 
 def _source(value: Any, field: str) -> Source:
     item = _object(value, field)
+    _exact_keys(item, {"label", "url"}, field)
     return Source(label=_text(item.get("label"), f"{field}.label"), url=_https(item.get("url"), f"{field}.url"))
 
 
@@ -124,6 +132,7 @@ def _paragraphs(value: Any, field: str, minimum: int, maximum: int) -> tuple[str
 
 def validate_report(payload: Any) -> Report:
     root = _object(payload, "report")
+    _exact_keys(root, {"date", "title", "lead", "main_story", "images", "agent_cases", "radar", "actions"}, "report")
     report_date = _text(root.get("date"), "date")
     try:
         date.fromisoformat(report_date)
@@ -131,6 +140,7 @@ def validate_report(payload: Any) -> Report:
         raise ReportValidationError("date must use YYYY-MM-DD") from error
 
     story_data = _object(root.get("main_story"), "main_story")
+    _exact_keys(story_data, {"title", "paragraphs", "sources"}, "main_story")
     main_story = MainStory(
         title=_text(story_data.get("title"), "main_story.title"),
         paragraphs=_paragraphs(story_data.get("paragraphs"), "main_story.paragraphs", 3, 5),
@@ -144,6 +154,7 @@ def validate_report(payload: Any) -> Report:
     image_keys: set[str] = set()
     for index, raw_image in enumerate(image_data):
         item = _object(raw_image, f"images[{index}]")
+        _exact_keys(item, {"key", "url", "source_url", "caption", "alt"}, f"images[{index}]")
         key = _text(item.get("key"), f"images[{index}].key")
         if not IMAGE_KEY_PATTERN.fullmatch(key):
             raise ReportValidationError(f"images[{index}].key is invalid")
@@ -168,6 +179,11 @@ def validate_report(payload: Any) -> Report:
     cases: list[AgentCase] = []
     for index, raw_case in enumerate(case_data):
         item = _object(raw_case, f"agent_cases[{index}]")
+        _exact_keys(
+            item,
+            {"title", "project", "scenario", "paragraphs", "evidence", "reusable_insight", "image_key", "sources"},
+            f"agent_cases[{index}]",
+        )
         image_key = _text(item.get("image_key"), f"agent_cases[{index}].image_key")
         if image_key not in image_keys:
             raise ReportValidationError(f"agent_cases[{index}] references an unknown image")
@@ -190,6 +206,7 @@ def validate_report(payload: Any) -> Report:
     radar: list[RadarItem] = []
     for index, raw_radar in enumerate(radar_data):
         item = _object(raw_radar, f"radar[{index}]")
+        _exact_keys(item, {"category", "title", "summary", "impact", "source"}, f"radar[{index}]")
         radar.append(
             RadarItem(
                 category=_text(item.get("category"), f"radar[{index}].category"),
@@ -206,6 +223,7 @@ def validate_report(payload: Any) -> Report:
     actions: list[ActionItem] = []
     for index, raw_action in enumerate(action_data):
         item = _object(raw_action, f"actions[{index}]")
+        _exact_keys(item, {"type", "title", "detail"}, f"actions[{index}]")
         action_type = _text(item.get("type"), f"actions[{index}].type")
         if action_type not in ACTION_TYPES:
             raise ReportValidationError(f"actions[{index}].type is invalid")
@@ -310,4 +328,3 @@ def report_json_schema() -> dict[str, Any]:
         "required": list(properties),
         "additionalProperties": False,
     }
-

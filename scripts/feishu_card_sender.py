@@ -7,10 +7,12 @@ import argparse
 import base64
 import hashlib
 import hmac
+import http.client
 import ipaddress
 import json
 import os
 import socket
+import ssl
 import sys
 import time
 import urllib.error
@@ -95,18 +97,19 @@ def get_tenant_access_token(app_id: str, app_secret: str) -> str:
     return str(token)
 
 
-def validate_remote_url(source: str, resolver: Any = socket.getaddrinfo) -> str:
+def _resolve_remote_url(source: str, resolver: Any) -> tuple[urllib.parse.SplitResult, list[str]]:
     parsed = urllib.parse.urlsplit(source)
     if parsed.scheme.lower() != "https":
-        raise FeishuError(f"Remote images must use HTTPS: {source}")
+        raise FeishuError("Remote images must use HTTPS")
     if not parsed.hostname or parsed.username or parsed.password:
-        raise FeishuError(f"Remote image URL is invalid: {source}")
+        raise FeishuError("Remote image URL is invalid")
     try:
         addresses = resolver(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
     except socket.gaierror as error:
         raise FeishuError(f"Image host could not be resolved: {parsed.hostname}") from error
     if not addresses:
         raise FeishuError(f"Image host could not be resolved: {parsed.hostname}")
+    public_addresses: list[str] = []
     for address in addresses:
         raw_address = address[4][0].split("%", 1)[0]
         try:
@@ -115,17 +118,71 @@ def validate_remote_url(source: str, resolver: Any = socket.getaddrinfo) -> str:
             raise FeishuError(f"Image host returned an invalid address: {parsed.hostname}") from error
         if not ip.is_global:
             raise FeishuError(f"Image host must resolve to a public address: {parsed.hostname}")
+        public_addresses.append(raw_address)
+    return parsed, public_addresses
+
+
+def validate_remote_url(source: str, resolver: Any = socket.getaddrinfo) -> str:
+    _resolve_remote_url(source, resolver)
     return source
 
 
-class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def __init__(self, resolver: Any = socket.getaddrinfo) -> None:
-        super().__init__()
-        self.resolver = resolver
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, port: int, address: str, timeout: int) -> None:
+        super().__init__(host, port=port, timeout=timeout, context=ssl.create_default_context())
+        self._pinned_address = address
 
-    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
-        validate_remote_url(newurl, resolver=self.resolver)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+    def connect(self) -> None:
+        self.sock = socket.create_connection(
+            (self._pinned_address, self.port),
+            self.timeout,
+            self.source_address,
+        )
+        if self._tunnel_host:
+            self._tunnel()
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+def _default_connection_factory(host: str, port: int, address: str, timeout: int) -> PinnedHTTPSConnection:
+    return PinnedHTTPSConnection(host, port, address, timeout)
+
+
+def fetch_remote_image(
+    source: str,
+    resolver: Any = socket.getaddrinfo,
+    connection_factory: Any = _default_connection_factory,
+    max_redirects: int = 5,
+) -> tuple[bytes, str]:
+    current = source
+    for _ in range(max_redirects + 1):
+        parsed, addresses = _resolve_remote_url(current, resolver)
+        host = parsed.hostname or "unknown"
+        port = parsed.port or 443
+        path = parsed.path or "/"
+        if parsed.query:
+            path += f"?{parsed.query}"
+        connection = connection_factory(host, port, addresses[0], 45)
+        try:
+            connection.request("GET", path, headers={"User-Agent": "Codex-AI-Daily/1.0", "Accept": "image/*"})
+            response = connection.getresponse()
+            if response.status in {301, 302, 303, 307, 308}:
+                location = response.getheader("Location")
+                if not location:
+                    raise FeishuError(f"Image redirect from {host} has no destination")
+                current = urllib.parse.urljoin(current, location)
+                continue
+            if not 200 <= response.status < 300:
+                raise FeishuError(f"Image download failed with HTTP {response.status} from {host}")
+            data = response.read(MAX_IMAGE_BYTES + 1)
+            filename = Path(parsed.path).name or "image"
+            return data, filename
+        except FeishuError:
+            raise
+        except (OSError, http.client.HTTPException) as error:
+            raise FeishuError(f"Image download failed for host {host}") from error
+        finally:
+            connection.close()
+    raise FeishuError("Image download exceeded the redirect limit")
 
 
 def detect_image_content_type(data: bytes) -> str:
@@ -146,18 +203,7 @@ def _is_inside(path: Path, roots: list[Path]) -> bool:
 
 def load_image(source: str, allowed_local_roots: list[Path] | None = None) -> tuple[bytes, str, str]:
     if source.startswith(("https://", "http://")):
-        validate_remote_url(source)
-        request = urllib.request.Request(source, headers={"User-Agent": "Codex-AI-Daily/1.0"})
-        opener = urllib.request.build_opener(SafeRedirectHandler())
-        try:
-            response = opener.open(request, timeout=45)
-        except urllib.error.HTTPError as error:
-            details = error.read().decode("utf-8", errors="replace")[:1000]
-            raise FeishuError(f"HTTP {error.code}: {details}") from error
-        except urllib.error.URLError as error:
-            raise FeishuError(f"Network request failed: {error.reason}") from error
-        data = response.read(MAX_IMAGE_BYTES + 1)
-        filename = Path(urllib.parse.urlparse(source).path).name or "image"
+        data, filename = fetch_remote_image(source)
     else:
         path = Path(source).expanduser().resolve()
         if not path.is_file():

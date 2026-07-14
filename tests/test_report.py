@@ -104,6 +104,17 @@ class ReportValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ReportValidationError, "unknown image"):
             validate_report(payload)
 
+    def test_rejects_unexpected_fields_at_every_object_boundary(self):
+        top_level = valid_payload()
+        top_level["unexpected"] = "value"
+        nested = valid_payload()
+        nested["main_story"]["unexpected"] = "value"
+
+        with self.assertRaisesRegex(ReportValidationError, "unexpected fields"):
+            validate_report(top_level)
+        with self.assertRaisesRegex(ReportValidationError, "unexpected fields"):
+            validate_report(nested)
+
     def test_schema_is_strict_and_requires_all_top_level_fields(self):
         schema = report_json_schema()
 
@@ -115,4 +126,3 @@ class ReportValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -32,6 +32,26 @@ class RendererTests(unittest.TestCase):
         self.assertIn("[项目复盘](https://example.com/agent-one)", markdown)
         self.assertIn("## 今日行动", markdown)
 
+    def test_fourth_image_is_rendered_in_cards_and_markdown(self):
+        payload = valid_payload()
+        payload["images"].append(
+            {
+                "key": "architecture",
+                "url": "https://cdn.example.com/architecture.png",
+                "source_url": "https://example.com/architecture",
+                "caption": "补充架构图",
+                "alt": "系统架构",
+            }
+        )
+        report = validate_report(payload)
+
+        manifest = render_feishu_manifest(report)
+        markdown = render_markdown(report)
+
+        self.assertIn("{{image:architecture}}", str(manifest["cards"]))
+        self.assertIn("![系统架构](https://cdn.example.com/architecture.png)", markdown)
+        self.assertIn("[查看图源](https://example.com/architecture)", markdown)
+
 
 if __name__ == "__main__":
     unittest.main()

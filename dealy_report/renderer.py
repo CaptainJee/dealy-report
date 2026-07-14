@@ -49,17 +49,24 @@ def render_feishu_manifest(report: Report, max_cards: int = 3) -> dict[str, Any]
         second.append(_markdown_div(f"**效果证据：** {case.evidence}\n\n**可复用启发：** {case.reusable_insight}"))
         second.append(_markdown_div(f"**来源：** {_links(case.sources)}"))
 
+    used_image_keys = {"hero", *(case.image_key for case in report.agent_cases)}
+    extra_images = [image for image in report.images if image.key not in used_image_keys]
+    third: list[dict[str, Any]] = []
+    for image in extra_images:
+        third.extend(_image_element(report, image.key))
+        third.append({"tag": "hr"})
+
     radar_lines = [
         f"- **{item.category}｜{item.title}**：{item.summary} {item.impact} [来源]({item.source.url})"
         for item in report.radar
     ]
     action_lines = [f"- **{item.type}｜{item.title}**：{item.detail}" for item in report.actions]
-    third = [
+    third.extend([
         _markdown_div("**技术雷达**\n\n" + "\n".join(radar_lines)),
         {"tag": "hr"},
         _markdown_div("**今日行动**\n\n" + "\n".join(action_lines)),
         {"tag": "note", "elements": [{"tag": "plain_text", "content": f"每日 AI 图文情报 · {report.date}"}]},
-    ]
+    ])
 
     return {
         "images": {image.key: image.url for image in report.images},
@@ -73,11 +80,15 @@ def render_feishu_manifest(report: Report, max_cards: int = 3) -> dict[str, Any]
 
 def render_markdown(report: Report) -> str:
     lines = [f"# {report.title}", "", report.lead, "", f"## {report.main_story.title}", ""]
+    hero = next(image for image in report.images if image.key == "hero")
+    lines.extend([f"![{hero.alt}]({hero.url})", "", f"{hero.caption} · [查看图源]({hero.source_url})", ""])
     for paragraph in report.main_story.paragraphs:
         lines.extend([paragraph, ""])
     lines.extend([f"来源：{_links(report.main_story.sources)}", "", "## Agent 真实项目应用", ""])
     for case in report.agent_cases:
         lines.extend([f"### {case.title}｜{case.project}", "", case.scenario, ""])
+        image = next(item for item in report.images if item.key == case.image_key)
+        lines.extend([f"![{image.alt}]({image.url})", "", f"{image.caption} · [查看图源]({image.source_url})", ""])
         for paragraph in case.paragraphs:
             lines.extend([paragraph, ""])
         lines.extend(
@@ -90,6 +101,12 @@ def render_markdown(report: Report) -> str:
                 "",
             ]
         )
+    used_image_keys = {"hero", *(case.image_key for case in report.agent_cases)}
+    extra_images = [image for image in report.images if image.key not in used_image_keys]
+    if extra_images:
+        lines.extend(["## 补充图表", ""])
+        for image in extra_images:
+            lines.extend([f"![{image.alt}]({image.url})", "", f"{image.caption} · [查看图源]({image.source_url})", ""])
     lines.extend(["## 技术雷达", ""])
     for item in report.radar:
         lines.append(f"- **{item.category}｜{item.title}**：{item.summary} {item.impact} [{item.source.label}]({item.source.url})")
@@ -97,4 +114,3 @@ def render_markdown(report: Report) -> str:
     for item in report.actions:
         lines.append(f"- **{item.type}｜{item.title}**：{item.detail}")
     return "\n".join(lines).rstrip() + "\n"
-

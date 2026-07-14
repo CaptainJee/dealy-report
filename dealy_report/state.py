@@ -15,6 +15,7 @@ class RunState:
     attempts: int = 0
     next_retry_at: str | None = None
     delivered_cards: int = 0
+    delivery_attempts: int = 0
     report_path: str | None = None
     manifest_path: str | None = None
     error: str | None = None
@@ -56,7 +57,8 @@ def should_run(state: RunState, schedule_time: str, timezone: str, now: datetime
         return True
     if state.phase in {"sent", "uncertain"} or state.attempts >= 3:
         return False
+    if state.phase == "send_failed" and state.delivery_attempts >= 3:
+        return False
     if state.next_retry_at and current < datetime.fromisoformat(state.next_retry_at).astimezone(zone):
         return False
     return True
-

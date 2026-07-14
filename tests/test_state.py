@@ -22,6 +22,17 @@ class StateTests(unittest.TestCase):
         self.assertFalse(should_run(RunState(date="2026-07-14", phase="sent"), "08:30", "Asia/Shanghai", now))
         self.assertFalse(should_run(RunState(date="2026-07-14", phase="uncertain"), "08:30", "Asia/Shanghai", now))
 
+    def test_delivery_retries_stop_after_three_attempts(self):
+        now = datetime(2026, 7, 14, 9, 0, tzinfo=SHANGHAI)
+        exhausted = RunState(
+            date="2026-07-14",
+            phase="send_failed",
+            attempts=1,
+            delivery_attempts=3,
+        )
+
+        self.assertFalse(should_run(exhausted, "08:30", "Asia/Shanghai", now))
+
     def test_generation_retries_use_15_and_60_minute_backoff_then_stop(self):
         now = datetime(2026, 7, 14, 9, 0, tzinfo=SHANGHAI)
 
