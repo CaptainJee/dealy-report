@@ -51,6 +51,7 @@ class SecretStore:
             try:
                 for name, value in values.items():
                     self._keyring.set_password(_SERVICE_NAME, f"{profile_id}:{name}", value)
+                self._delete_file_values(profile_id)
                 return
             except Exception:
                 self._use_file_fallback_or_raise()
@@ -62,7 +63,10 @@ class SecretStore:
         validate_profile_id(profile_id)
         if self._keyring is not None:
             try:
-                return self._get_keyring_values(profile_id)
+                values = self._get_keyring_values(profile_id)
+                if values is not None or not self._allow_file_fallback:
+                    return values
+                return self._get_file_values(profile_id)
             except Exception:
                 self._use_file_fallback_or_raise()
         else:
@@ -77,6 +81,7 @@ class SecretStore:
                     username = f"{profile_id}:{name}"
                     if self._keyring.get_password(_SERVICE_NAME, username) is not None:
                         self._keyring.delete_password(_SERVICE_NAME, username)
+                self._delete_file_values(profile_id)
                 return
             except Exception:
                 self._use_file_fallback_or_raise()
@@ -131,7 +136,10 @@ class SecretStore:
         profiles = self._load_file()
         if profile_id in profiles:
             del profiles[profile_id]
-            self._write_file(profiles)
+            if profiles:
+                self._write_file(profiles)
+            else:
+                self._file_path.unlink(missing_ok=True)
 
     def _load_file(self) -> dict[str, dict[str, str]]:
         path = self._file_path

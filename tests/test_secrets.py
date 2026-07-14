@@ -135,6 +135,42 @@ class SecretStoreFallbackTests(unittest.TestCase):
             store.delete_profile("daily-ai")
             self.assertIsNone(store.get("daily-ai"))
 
+    def test_reads_and_deletes_authorized_fallback_after_keyring_recovers(self) -> None:
+        from dealy_report.secrets import SecretStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            fallback = SecretStore(data_dir=data_dir, keyring_module=None, allow_file_fallback=True)
+            fallback.set("daily-ai", webhook="webhook", app_id="app-id", app_secret="app-secret")
+
+            recovered = SecretStore(
+                data_dir=data_dir,
+                keyring_module=FakeKeyring(),
+                allow_file_fallback=True,
+            )
+            self.assertEqual("webhook", recovered.get("daily-ai")["webhook"])
+            recovered.delete_profile("daily-ai")
+
+            self.assertIsNone(fallback.get("daily-ai"))
+
+    def test_successful_keyring_write_removes_stale_file_fallback(self) -> None:
+        from dealy_report.secrets import SecretStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            fallback = SecretStore(data_dir=data_dir, keyring_module=None, allow_file_fallback=True)
+            fallback.set("daily-ai", webhook="old", app_id="old-app", app_secret="old-secret")
+
+            recovered = SecretStore(
+                data_dir=data_dir,
+                keyring_module=FakeKeyring(),
+                allow_file_fallback=True,
+            )
+            recovered.set("daily-ai", webhook="new", app_id="new-app", app_secret="new-secret")
+
+            self.assertIsNone(fallback.get("daily-ai"))
+            self.assertEqual("new", recovered.get("daily-ai")["webhook"])
+
 
 if __name__ == "__main__":
     unittest.main()
