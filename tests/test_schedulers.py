@@ -166,6 +166,73 @@ class SchedulerInstallationTests(unittest.TestCase):
         self.assertIn("# dealy-report:other", installed_crontab)
         self.assertIn("# dealy-report:weekday-report-extra", installed_crontab)
 
+    def test_macos_install_uses_the_user_launch_agents_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            home = Path(temporary_dir) / "home"
+            data_dir = Path(temporary_dir) / "data"
+            expected = home / "Library" / "LaunchAgents" / "com.captainjee.dealy-report.weekday-report.plist"
+            with patch("dealy_report.schedulers.Path.home", return_value=home), patch(
+                "dealy_report.schedulers.os.getuid", return_value=501, create=True
+            ), patch("dealy_report.schedulers.subprocess.run") as run:
+                result = install_scheduler(
+                    "weekday-report",
+                    "/usr/bin/python3",
+                    "/srv/dealy-report",
+                    data_dir,
+                    platform_name="Darwin",
+                )
+
+            self.assertEqual(result["backend"], "launchctl")
+            self.assertTrue(expected.exists())
+            self.assertEqual(
+                run.call_args.args[0],
+                ["launchctl", "bootstrap", "gui/501", str(expected)],
+            )
+
+    def test_linux_falls_back_to_cron_when_user_systemd_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            data_dir = Path(temporary_dir)
+            systemd_error = subprocess.CalledProcessError(1, ["systemctl"], stderr="No medium found")
+            completed = [
+                systemd_error,
+                subprocess.CompletedProcess(["crontab", "-l"], 1, "", "no crontab"),
+                subprocess.CompletedProcess(["crontab", "-"], 0, "", ""),
+            ]
+            with patch("dealy_report.schedulers.Path.home", return_value=data_dir / "home"), patch(
+                "dealy_report.schedulers.shutil.which", return_value="/usr/bin/systemctl"
+            ), patch("dealy_report.schedulers.subprocess.run", side_effect=completed) as run:
+                result = install_scheduler(
+                    "weekday-report",
+                    "/usr/bin/python3",
+                    "/srv/dealy-report",
+                    data_dir,
+                    platform_name="Linux",
+                )
+
+            self.assertEqual(result["backend"], "cron")
+            self.assertEqual(run.call_count, 3)
+            marker = data_dir / "schedulers" / "dealy-report-weekday-report.backend"
+            self.assertEqual(marker.read_text(encoding="utf-8"), "cron\n")
+
+    def test_remove_uses_the_backend_recorded_during_install(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            data_dir = Path(temporary_dir)
+            marker = data_dir / "schedulers" / "dealy-report-weekday-report.backend"
+            marker.parent.mkdir(parents=True)
+            marker.write_text("cron\n", encoding="utf-8")
+            completed = [
+                subprocess.CompletedProcess(["crontab", "-l"], 0, "*/5 * * * * old # dealy-report:weekday-report\n", ""),
+                subprocess.CompletedProcess(["crontab", "-"], 0, "", ""),
+            ]
+            with patch("dealy_report.schedulers.shutil.which", return_value="/usr/bin/systemctl"), patch(
+                "dealy_report.schedulers.subprocess.run", side_effect=completed
+            ) as run:
+                result = remove_scheduler("weekday-report", data_dir, platform_name="Linux")
+
+            self.assertEqual(result["backend"], "cron")
+            self.assertEqual(run.call_count, 2)
+            self.assertFalse(marker.exists())
+
     def test_dry_runs_do_not_call_subprocess_or_create_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             data_dir = Path(temporary_dir) / "new-data"
@@ -192,8 +259,10 @@ class SchedulerInstallationTests(unittest.TestCase):
 
     def test_macos_remove_tolerates_an_unloaded_existing_plist(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
-            plist_path = Path(temporary_dir) / "schedulers" / "com.captainjee.dealy-report.weekday-report.plist"
-            plist_path.parent.mkdir()
+            home = Path(temporary_dir) / "home"
+            data_dir = Path(temporary_dir) / "data"
+            plist_path = home / "Library" / "LaunchAgents" / "com.captainjee.dealy-report.weekday-report.plist"
+            plist_path.parent.mkdir(parents=True)
             plist_path.write_text("placeholder", encoding="utf-8")
 
             def launchctl_not_loaded(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -201,10 +270,12 @@ class SchedulerInstallationTests(unittest.TestCase):
                     raise subprocess.CalledProcessError(3, command, stderr="Could not find service")
                 return subprocess.CompletedProcess(command, 3, "", "Could not find service")
 
-            with patch("dealy_report.schedulers.os.getuid", return_value=501, create=True), patch(
+            with patch("dealy_report.schedulers.Path.home", return_value=home), patch(
+                "dealy_report.schedulers.os.getuid", return_value=501, create=True
+            ), patch(
                 "dealy_report.schedulers.subprocess.run", side_effect=launchctl_not_loaded
             ):
-                remove_scheduler("weekday-report", plist_path.parents[1], platform_name="Darwin")
+                remove_scheduler("weekday-report", data_dir, platform_name="Darwin")
 
             self.assertFalse(plist_path.exists())
 

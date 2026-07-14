@@ -20,9 +20,16 @@ class RendererTests(unittest.TestCase):
         self.assertIn("Agent 真实项目应用", serialized)
         self.assertIn("https://example.com/agent-one", serialized)
 
-    def test_rejects_card_limit_below_required_layout(self):
-        with self.assertRaisesRegex(ValueError, "three cards"):
-            render_feishu_manifest(self.report, max_cards=2)
+    def test_compacts_article_without_losing_sections_when_card_limit_is_lower(self):
+        two_cards = render_feishu_manifest(self.report, max_cards=2)
+        one_card = render_feishu_manifest(self.report, max_cards=1)
+
+        self.assertEqual(len(two_cards["cards"]), 2)
+        self.assertIn("Agent 真实项目应用", str(two_cards["cards"][1]))
+        self.assertIn("技术雷达", str(two_cards["cards"][1]))
+        self.assertEqual(len(one_card["cards"]), 1)
+        self.assertIn("Agent 真实项目应用", str(one_card["cards"][0]))
+        self.assertIn("今日行动", str(one_card["cards"][0]))
 
     def test_markdown_preserves_full_report_and_sources(self):
         markdown = render_markdown(self.report)

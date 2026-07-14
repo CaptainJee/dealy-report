@@ -191,9 +191,17 @@ def install_scheduler(
         command = ["schtasks", "/Create", "/TN", name, "/XML", str(definition_path), "/F"]
         subprocess.run(command, check=True)
     elif backend == "launchctl":
-        plist_path = data_path / "schedulers" / f"{_macos_label(profile_id)}.plist"
+        plist_path = _launch_agent_path(profile_id)
         plist_path.parent.mkdir(parents=True, exist_ok=True)
         (data_path / "logs").mkdir(parents=True, exist_ok=True)
+        if plist_path.exists():
+            completed = subprocess.run(
+                ["launchctl", "bootout", _launchctl_domain(), str(plist_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            _raise_unexpected_removal_failure(completed, "launchctl")
         plist_path.write_bytes(build_macos_plist(profile_id, python_path, repo_path, data_dir))
         command = ["launchctl", "bootstrap", _launchctl_domain(), str(plist_path)]
         subprocess.run(command, check=True)
@@ -204,12 +212,21 @@ def install_scheduler(
         service_path.write_text(service_text, encoding="utf-8")
         timer_path.write_text(timer_text, encoding="utf-8")
         systemctl = _systemctl_path()
-        subprocess.run([systemctl, "--user", "daemon-reload"], check=True)
-        subprocess.run([systemctl, "--user", "enable", "--now", timer_path.name], check=True)
+        try:
+            subprocess.run([systemctl, "--user", "daemon-reload"], check=True)
+            subprocess.run([systemctl, "--user", "enable", "--now", timer_path.name], check=True)
+        except subprocess.CalledProcessError:
+            service_path.unlink(missing_ok=True)
+            timer_path.unlink(missing_ok=True)
+            (data_path / "logs").mkdir(parents=True, exist_ok=True)
+            _replace_cron_entry(profile_id, build_cron_line(profile_id, python_path, repo_path, data_dir))
+            backend = "cron"
+            description = _description("install", backend, name, data_path)
     else:
         (data_path / "logs").mkdir(parents=True, exist_ok=True)
         _replace_cron_entry(profile_id, build_cron_line(profile_id, python_path, repo_path, data_dir))
 
+    _write_backend_marker(data_path, name, backend)
     return description
 
 
@@ -228,8 +245,8 @@ def remove_scheduler(
     """
     name = scheduler_name(profile_id)
     resolved_data_dir = _resolve_remove_data_dir(python_path_or_data_dir, repo_path, data_dir)
-    backend = _select_backend(platform_name)
     data_path = Path(resolved_data_dir)
+    backend = _select_backend(platform_name) if dry_run else _installed_backend(data_path, name, platform_name)
     description = _description("remove", backend, name, data_path)
     if dry_run:
         return description
@@ -246,7 +263,7 @@ def remove_scheduler(
         if definition_path.exists():
             definition_path.unlink()
     elif backend == "launchctl":
-        plist_path = data_path / "schedulers" / f"{_macos_label(profile_id)}.plist"
+        plist_path = _launch_agent_path(profile_id)
         if plist_path.exists():
             completed = subprocess.run(
                 ["launchctl", "bootout", _launchctl_domain(), str(plist_path)],
@@ -275,6 +292,7 @@ def remove_scheduler(
     else:
         _remove_cron_entry(profile_id)
 
+    _backend_marker(data_path, name).unlink(missing_ok=True)
     return description
 
 
@@ -355,6 +373,32 @@ def _launchctl_domain() -> str:
     except AttributeError as error:
         raise SchedulerError("launchctl requires a POSIX user identifier") from error
     return f"gui/{user_id}"
+
+
+def _launch_agent_path(profile_id: str) -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{_macos_label(profile_id)}.plist"
+
+
+def _backend_marker(data_dir: Path, name: str) -> Path:
+    return data_dir / "schedulers" / f"{name}.backend"
+
+
+def _write_backend_marker(data_dir: Path, name: str, backend: str) -> None:
+    marker = _backend_marker(data_dir, name)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    temporary = marker.with_suffix(".backend.tmp")
+    temporary.write_text(f"{backend}\n", encoding="utf-8")
+    os.replace(temporary, marker)
+
+
+def _installed_backend(data_dir: Path, name: str, platform_name: str | None) -> str:
+    marker = _backend_marker(data_dir, name)
+    if not marker.exists():
+        return _select_backend(platform_name)
+    backend = marker.read_text(encoding="utf-8").strip()
+    if backend not in {"windows-task", "launchctl", "systemd", "cron"}:
+        raise SchedulerError(f"invalid scheduler backend marker for {name}")
+    return backend
 
 
 def _systemd_paths(name: str) -> tuple[Path, Path]:

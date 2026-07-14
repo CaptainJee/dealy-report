@@ -30,8 +30,8 @@ def _card(title: str, elements: list[dict[str, Any]], template: str = "blue") ->
 
 
 def render_feishu_manifest(report: Report, max_cards: int = 3) -> dict[str, Any]:
-    if max_cards < 3:
-        raise ValueError("article layout requires three cards")
+    if not 1 <= max_cards <= 3:
+        raise ValueError("max_cards must be between 1 and 3")
 
     first: list[dict[str, Any]] = [_markdown_div(report.lead)]
     first.extend(_image_element(report, "hero"))
@@ -68,14 +68,33 @@ def render_feishu_manifest(report: Report, max_cards: int = 3) -> dict[str, Any]
         {"tag": "note", "elements": [{"tag": "plain_text", "content": f"每日 AI 图文情报 · {report.date}"}]},
     ])
 
-    return {
-        "images": {image.key: image.url for image in report.images},
-        "cards": [
+    if max_cards == 3:
+        cards = [
             _card(report.title, first, "blue"),
             _card("Agent 真实项目应用", second, "green"),
             _card("技术雷达与今日行动", third, "turquoise"),
-        ],
-    }
+        ]
+    elif max_cards == 2:
+        cards = [
+            _card(report.title, first, "blue"),
+            _card("Agent 真实项目应用与行动", [*second, {"tag": "hr"}, *third], "green"),
+        ]
+    else:
+        cards = [
+            _card(
+                report.title,
+                [
+                    *first,
+                    {"tag": "hr"},
+                    _markdown_div("**Agent 真实项目应用**"),
+                    *second,
+                    {"tag": "hr"},
+                    *third,
+                ],
+                "blue",
+            )
+        ]
+    return {"images": {image.key: image.url for image in report.images}, "cards": cards}
 
 
 def render_markdown(report: Report) -> str:
