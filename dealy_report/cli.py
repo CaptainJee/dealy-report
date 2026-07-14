@@ -15,7 +15,7 @@ from typing import Any, Callable, Sequence, TextIO
 from assets.connectivity_test import write_connectivity_png
 
 from .codex_install import CodexCheck, ensure_codex
-from .config import ConfigError, ProfileConfig, config_dir, data_dir, validate_profile_id
+from .config import SECTION_LABELS, ConfigError, ProfileConfig, config_dir, data_dir, validate_profile_id
 from .delivery import FeishuCredentials, deliver_manifest
 from .runner import RunOutcome, run_profile
 from .schedulers import SchedulerError, install_scheduler, remove_scheduler, scheduler_name
@@ -239,6 +239,11 @@ def _setup(args: argparse.Namespace, deps: Dependencies) -> int:
     language = _ask(deps, "Language", profile.language)
     audience = _ask(deps, "Audience", profile.audience)
     topics_text = deps.input_func(f"Topics, comma-separated [{', '.join(profile.topics)}]: ").strip()
+    section_choices = ", ".join(SECTION_LABELS)
+    sections_text = deps.input_func(
+        "Optional sections (Agent real projects is always included; "
+        f"choices: {section_choices}) [{', '.join(profile.sections)}]: "
+    ).strip()
     source_balance = _ask(deps, "Source balance", profile.source_balance)
     model = _ask(deps, "Model", profile.model)
     reasoning_effort = _ask(deps, "Reasoning effort", profile.reasoning_effort)
@@ -253,6 +258,7 @@ def _setup(args: argparse.Namespace, deps: Dependencies) -> int:
         language=language,
         audience=audience,
         topics=tuple(item.strip() for item in topics_text.split(",") if item.strip()) if topics_text else profile.topics,
+        sections=tuple(item.strip() for item in sections_text.split(",") if item.strip()) if sections_text else profile.sections,
         source_balance=source_balance,
         model=model,
         reasoning_effort=reasoning_effort,

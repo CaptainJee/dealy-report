@@ -19,6 +19,14 @@ def load_bootstrap():
 
 
 class BootstrapTests(unittest.TestCase):
+    def test_rejects_python_older_than_3_11_before_creating_runtime(self):
+        bootstrap = load_bootstrap()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "Python 3.11"):
+                bootstrap.ensure_runtime(root=root, version_info=(3, 10, 14))
+            self.assertFalse((root / ".runtime").exists())
+
     def test_repository_lock_contains_only_exact_runtime_dependencies(self):
         lines = (ROOT / "requirements.lock").read_text(encoding="utf-8").splitlines()
         self.assertEqual(lines, ["keyring==25.7.0", "tzdata==2026.3"])

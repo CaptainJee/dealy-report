@@ -35,7 +35,10 @@ def ensure_runtime(
     root: Path = ROOT,
     python_executable: str = sys.executable,
     run: Callable[..., subprocess.CompletedProcess[object]] = subprocess.run,
+    version_info: Sequence[int] = sys.version_info,
 ) -> Path:
+    if tuple(version_info[:2]) < (3, 11):
+        raise RuntimeError("Python 3.11 or newer is required")
     runtime_dir = root / ".runtime"
     venv_dir = runtime_dir / "venv"
     python_path = venv_python(venv_dir)

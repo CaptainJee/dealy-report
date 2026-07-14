@@ -81,7 +81,7 @@ class CliTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            answers = iter(["", "", "", "", "", "", "AI, Agents", "", "", "", "", "2", "y", ""])
+            answers = iter(["", "", "", "", "", "", "AI, Agents", "model-platform,agent-engineering", "", "", "", "", "2", "y", ""])
             secrets = iter(["hook-value", "app-value", "secret-value", "bot-value"])
             keyring_store = FakeStore(set_error=SecretError("unavailable"))
             file_store = FakeStore()
@@ -108,6 +108,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             saved = ProfileConfig.load(root / "config" / "profiles" / "daily-ai.json")
             self.assertEqual(saved.topics, ("AI", "Agents"))
+            self.assertEqual(saved.sections, ("model-platform", "agent-engineering"))
             self.assertEqual(saved.audience, "developer/tech-lead")
             self.assertEqual(saved.max_cards, 2)
             self.assertEqual(factory_calls, [False, True])
@@ -129,7 +130,7 @@ class CliTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            answers = iter(["", "", "", "", "", "", "", "", "", "", "", "", "n"])
+            answers = iter(["", "", "", "", "", "", "", "", "", "", "", "", "", "n"])
             secrets = iter(["hook", "app", "secret", ""])
             fallback_created = []
 
@@ -163,6 +164,7 @@ class CliTests(unittest.TestCase):
                 language="en-US",
                 audience="staff engineers",
                 topics=("Agents", "Evaluation"),
+                sections=("agent-engineering", "benchmarks-evaluation"),
                 source_balance="global",
                 model="gpt-5.5",
                 reasoning_effort="xhigh",
@@ -170,7 +172,7 @@ class CliTests(unittest.TestCase):
             )
             path = root / "config" / "profiles" / "team-report.json"
             existing.save(path)
-            answers = iter(["team-report", "", "", "", "", "", "", "", "", "", "", "", "n"])
+            answers = iter(["team-report", "", "", "", "", "", "", "", "", "", "", "", "", "n"])
             old_secrets = {"webhook": "old-hook", "app_id": "old-app", "app_secret": "old-secret", "bot_secret": ""}
             store = FakeStore(values=old_secrets)
             deps = self.make_dependencies(
@@ -197,7 +199,7 @@ class CliTests(unittest.TestCase):
             old_values = {"webhook": "old-hook", "app_id": "old-app", "app_secret": "old-secret", "bot_secret": "old-bot"}
             strict_store = FakeStore(values=None)
             fallback_store = FakeStore(values=old_values)
-            answers = iter(["", "", "", "", "", "", "", "", "", "", "", "", "n"])
+            answers = iter(["", "", "", "", "", "", "", "", "", "", "", "", "", "n"])
 
             def store_factory(allow_file_fallback=False):
                 return fallback_store if allow_file_fallback else strict_store
@@ -218,7 +220,7 @@ class CliTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            answers = iter(["", "", "", "", "", "", "", "", "", "", "", "4"])
+            answers = iter(["", "", "", "", "", "", "", "", "", "", "", "", "4"])
             deps = self.make_dependencies(cli, root, input_func=lambda prompt: next(answers))
 
             self.assertNotEqual(cli.main(["setup"], deps=deps), 0)

@@ -29,6 +29,8 @@ except ImportError:  # pragma: no cover - Windows is the production environment.
 
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+FEISHU_TENANT_TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+FEISHU_IMAGE_UPLOAD_URL = "https://open.feishu.cn/open-apis/im/v1/images"
 ALLOWED_IMAGE_TYPES = {
     "image/gif",
     "image/jpeg",
@@ -84,7 +86,7 @@ def open_request(request: urllib.request.Request, timeout: int = 45, delivery: b
 def get_tenant_access_token(app_id: str, app_secret: str) -> str:
     payload = json.dumps({"app_id": app_id, "app_secret": app_secret}).encode("utf-8")
     request = urllib.request.Request(
-        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        FEISHU_TENANT_TOKEN_URL,
         data=payload,
         headers={"Content-Type": "application/json; charset=utf-8"},
         method="POST",
@@ -241,7 +243,7 @@ def upload_image(token: str, source: str, allowed_local_roots: list[Path] | None
         ]
     )
     request = urllib.request.Request(
-        "https://open.feishu.cn/open-apis/im/v1/images",
+        FEISHU_IMAGE_UPLOAD_URL,
         data=body,
         headers={
             "Authorization": f"Bearer {token}",
