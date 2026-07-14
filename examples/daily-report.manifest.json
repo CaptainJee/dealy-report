@@ -1,0 +1,47 @@
+{
+  "images": {
+    "cover": "C:/path/to/daily-report-cover.png"
+  },
+  "cards": [
+    {
+      "config": {
+        "wide_screen_mode": true,
+        "enable_forward": true
+      },
+      "header": {
+        "template": "blue",
+        "title": {
+          "tag": "plain_text",
+          "content": "每日 AI 图文情报"
+        }
+      },
+      "elements": [
+        {
+          "tag": "img",
+          "img_key": "{{image:cover}}",
+          "alt": {
+            "tag": "plain_text",
+            "content": "今日 AI 情报封面"
+          }
+        },
+        {
+          "tag": "div",
+          "text": {
+            "tag": "lark_md",
+            "content": "**今日总览**\n\n用两到三段短文说明当天最重要的变化、影响与开发者视角。"
+          }
+        },
+        {
+          "tag": "hr"
+        },
+        {
+          "tag": "div",
+          "text": {
+            "tag": "lark_md",
+            "content": "**Agent 真实项目应用**\n\n介绍经过来源验证的真实产品、开源项目或企业案例，并说明可复用的工程启发。"
+          }
+        }
+      ]
+    }
+  ]
+}
