@@ -214,6 +214,65 @@ class SchedulerInstallationTests(unittest.TestCase):
             marker = data_dir / "schedulers" / "dealy-report-weekday-report.backend"
             self.assertEqual(marker.read_text(encoding="utf-8"), "cron\n")
 
+    def test_install_removes_recorded_cron_before_migrating_to_systemd(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            data_dir = Path(temporary_dir)
+            marker = data_dir / "schedulers" / "dealy-report-weekday-report.backend"
+            marker.parent.mkdir(parents=True)
+            marker.write_text("cron\n", encoding="utf-8")
+            completed = [
+                subprocess.CompletedProcess(
+                    ["crontab", "-l"],
+                    0,
+                    "*/5 * * * * old # dealy-report:weekday-report\n",
+                    "",
+                ),
+                subprocess.CompletedProcess(["crontab", "-"], 0, "", ""),
+                subprocess.CompletedProcess(["systemctl", "--user", "daemon-reload"], 0, "", ""),
+                subprocess.CompletedProcess(["systemctl", "--user", "enable"], 0, "", ""),
+            ]
+            with patch("dealy_report.schedulers.Path.home", return_value=data_dir / "home"), patch(
+                "dealy_report.schedulers.shutil.which", return_value="/usr/bin/systemctl"
+            ), patch("dealy_report.schedulers.subprocess.run", side_effect=completed) as run:
+                result = install_scheduler(
+                    "weekday-report",
+                    "/usr/bin/python3",
+                    "/srv/dealy-report",
+                    data_dir,
+                    platform_name="Linux",
+                )
+
+            self.assertEqual(result["backend"], "systemd")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "systemd\n")
+            self.assertEqual(run.call_args_list[0].args[0], ["crontab", "-l"])
+            self.assertEqual(run.call_args_list[1].args[0], ["crontab", "-"])
+            removed_crontab = run.call_args_list[1].kwargs["input"]
+            self.assertNotIn("dealy-report:weekday-report", removed_crontab)
+
+    def test_existing_systemd_is_not_replaced_with_cron_when_refresh_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            data_dir = Path(temporary_dir)
+            marker = data_dir / "schedulers" / "dealy-report-weekday-report.backend"
+            marker.parent.mkdir(parents=True)
+            marker.write_text("systemd\n", encoding="utf-8")
+            with patch("dealy_report.schedulers.Path.home", return_value=data_dir / "home"), patch(
+                "dealy_report.schedulers.shutil.which", return_value="/usr/bin/systemctl"
+            ), patch(
+                "dealy_report.schedulers.subprocess.run",
+                side_effect=subprocess.CalledProcessError(1, ["systemctl"], stderr="No medium found"),
+            ) as run:
+                with self.assertRaisesRegex(SchedulerError, "existing systemd"):
+                    install_scheduler(
+                        "weekday-report",
+                        "/usr/bin/python3",
+                        "/srv/dealy-report",
+                        data_dir,
+                        platform_name="Linux",
+                    )
+
+            self.assertEqual(marker.read_text(encoding="utf-8"), "systemd\n")
+            self.assertFalse(any(call.args[0][:1] == ["crontab"] for call in run.call_args_list))
+
     def test_remove_uses_the_backend_recorded_during_install(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             data_dir = Path(temporary_dir)

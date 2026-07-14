@@ -76,6 +76,11 @@ def open_request(request: urllib.request.Request, timeout: int = 45, delivery: b
     try:
         return urllib.request.urlopen(request, timeout=timeout)
     except urllib.error.HTTPError as error:
+        error.close()
+        if delivery and (error.code == 408 or 500 <= error.code <= 599):
+            raise FeishuDeliveryUncertain(
+                "Feishu delivery result is uncertain after an upstream HTTP failure"
+            ) from error
         raise FeishuError(f"Feishu request failed with HTTP {error.code}") from error
     except urllib.error.URLError as error:
         if delivery:

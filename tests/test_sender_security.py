@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.feishu_card_sender import (
+    FeishuDeliveryUncertain,
     FeishuError,
     PinnedHTTPSConnection,
     detect_image_content_type,
@@ -174,6 +175,22 @@ class SenderSecurityTests(unittest.TestCase):
         message = str(raised.exception)
         self.assertNotIn("sensitive", message)
         self.assertNotIn("upstream-secret-body", message)
+
+    def test_delivery_http_5xx_is_uncertain_and_must_not_be_retried(self):
+        request = urllib.request.Request("https://open.feishu.cn/hook?token=sensitive")
+        error = urllib.error.HTTPError(
+            request.full_url,
+            502,
+            "Bad Gateway",
+            {},
+            io.BytesIO(b"upstream-secret-body"),
+        )
+        with patch("scripts.feishu_card_sender.urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(FeishuDeliveryUncertain) as raised:
+                open_request(request, delivery=True)
+
+        self.assertNotIn("sensitive", str(raised.exception))
+        self.assertNotIn("upstream-secret-body", str(raised.exception))
 
     def test_pinned_connection_uses_validated_ip_and_original_hostname_for_sni(self):
         connection = PinnedHTTPSConnection("images.example.com", 443, "93.184.216.34", 45)

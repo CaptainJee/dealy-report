@@ -184,6 +184,11 @@ def install_scheduler(
     if dry_run:
         return description
 
+    previous_backend = _recorded_backend(data_path, name)
+    if previous_backend is not None and previous_backend != backend:
+        _remove_backend(profile_id, name, data_path, previous_backend)
+        _backend_marker(data_path, name).unlink(missing_ok=True)
+
     if backend == "windows-task":
         definition_path = data_path / "schedulers" / f"{name}.xml"
         definition_path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,7 +220,9 @@ def install_scheduler(
         try:
             subprocess.run([systemctl, "--user", "daemon-reload"], check=True)
             subprocess.run([systemctl, "--user", "enable", "--now", timer_path.name], check=True)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as error:
+            if previous_backend == "systemd":
+                raise SchedulerError("existing systemd scheduler could not be refreshed safely") from error
             service_path.unlink(missing_ok=True)
             timer_path.unlink(missing_ok=True)
             (data_path / "logs").mkdir(parents=True, exist_ok=True)
@@ -251,46 +258,7 @@ def remove_scheduler(
     if dry_run:
         return description
 
-    if backend == "windows-task":
-        completed = subprocess.run(
-            ["schtasks", "/Delete", "/TN", name, "/F"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        _raise_unexpected_removal_failure(completed, "schtasks")
-        definition_path = data_path / "schedulers" / f"{name}.xml"
-        if definition_path.exists():
-            definition_path.unlink()
-    elif backend == "launchctl":
-        plist_path = _launch_agent_path(profile_id)
-        if plist_path.exists():
-            completed = subprocess.run(
-                ["launchctl", "bootout", _launchctl_domain(), str(plist_path)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            _raise_unexpected_removal_failure(completed, "launchctl")
-            plist_path.unlink()
-    elif backend == "systemd":
-        service_path, timer_path = _systemd_paths(name)
-        if service_path.exists() or timer_path.exists():
-            systemctl = _systemctl_path()
-            completed = subprocess.run(
-                [systemctl, "--user", "disable", "--now", timer_path.name],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            _raise_unexpected_removal_failure(completed, "systemctl")
-            if service_path.exists():
-                service_path.unlink()
-            if timer_path.exists():
-                timer_path.unlink()
-            subprocess.run([systemctl, "--user", "daemon-reload"], check=True)
-    else:
-        _remove_cron_entry(profile_id)
+    _remove_backend(profile_id, name, data_path, backend)
 
     _backend_marker(data_path, name).unlink(missing_ok=True)
     return description
@@ -391,14 +359,58 @@ def _write_backend_marker(data_dir: Path, name: str, backend: str) -> None:
     os.replace(temporary, marker)
 
 
-def _installed_backend(data_dir: Path, name: str, platform_name: str | None) -> str:
+def _recorded_backend(data_dir: Path, name: str) -> str | None:
     marker = _backend_marker(data_dir, name)
     if not marker.exists():
-        return _select_backend(platform_name)
+        return None
     backend = marker.read_text(encoding="utf-8").strip()
     if backend not in {"windows-task", "launchctl", "systemd", "cron"}:
         raise SchedulerError(f"invalid scheduler backend marker for {name}")
     return backend
+
+
+def _installed_backend(data_dir: Path, name: str, platform_name: str | None) -> str:
+    return _recorded_backend(data_dir, name) or _select_backend(platform_name)
+
+
+def _remove_backend(profile_id: str, name: str, data_path: Path, backend: str) -> None:
+    if backend == "windows-task":
+        completed = subprocess.run(
+            ["schtasks", "/Delete", "/TN", name, "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        _raise_unexpected_removal_failure(completed, "schtasks")
+        (data_path / "schedulers" / f"{name}.xml").unlink(missing_ok=True)
+        return
+    if backend == "launchctl":
+        plist_path = _launch_agent_path(profile_id)
+        if plist_path.exists():
+            completed = subprocess.run(
+                ["launchctl", "bootout", _launchctl_domain(), str(plist_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            _raise_unexpected_removal_failure(completed, "launchctl")
+            plist_path.unlink()
+        return
+    if backend == "systemd":
+        service_path, timer_path = _systemd_paths(name)
+        systemctl = _systemctl_path()
+        completed = subprocess.run(
+            [systemctl, "--user", "disable", "--now", timer_path.name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        _raise_unexpected_removal_failure(completed, "systemctl")
+        service_path.unlink(missing_ok=True)
+        timer_path.unlink(missing_ok=True)
+        subprocess.run([systemctl, "--user", "daemon-reload"], check=True)
+        return
+    _remove_cron_entry(profile_id)
 
 
 def _systemd_paths(name: str) -> tuple[Path, Path]:
